@@ -24,15 +24,27 @@ class CorrectorPlayEnv(gym.Env):
         base_step_range: tuple[float, float] = (0.0, 500.0),
         fail_prob_range: tuple[float, float] = (0.0, 0.2),  # Per-action fail prob range
         user_couplings: dict | None = None,
-        goal_threshold: float = 10.0,  # Threshold for considering goal achieved
+        random_process: tuple[bool, bool, bool] = (True, True, True),  # (couplings, failures, noise)
     ):
         super().__init__()
         self.render_mode = render_mode
+        self.random_process = random_process
+
+        enable_couplings, enable_failures, enable_noise = self.random_process
+
+        if not enable_couplings:
+            couple_prob_pct = 0.0
+        
+        if not enable_failures:
+            fail_prob_range = (0.0, 0.0)
+
+        if not enable_noise:
+            noise_sigma = 0.0
+
         self.max_steps = int(max_steps)
         self.noise_sigma = float(noise_sigma)
         self.couple_prob_pct = float(couple_prob_pct)
         self.user_couplings = user_couplings
-        self.goal_threshold = float(goal_threshold)
 
         # RNG for random variables that stay fixed during play
         self.static_rng = np.random.default_rng(static_seed)
@@ -67,8 +79,6 @@ class CorrectorPlayEnv(gym.Env):
         # ✅ Per-action fail probabilities, fixed for the whole run
         f_lo, f_hi = fail_prob_range
         self.fail_probs = self._init_fail_probs_fixed(f_lo, f_hi)
-
-        self.t = 0
 
     def _sample_init_params_fixed(self):
         init_params = {}
@@ -137,15 +147,11 @@ class CorrectorPlayEnv(gym.Env):
         self.t = 0
         self.params = dict(self.init_params)
 
-        # Calculate initial deviation for monitoring
-        init_main_deviation = sum(abs(self.init_params[k]) for k in self.MAIN_KEYS)
-
         info = {
             "base_steps": dict(self.base_steps),
             "init_params": dict(self.init_params),
             # Optional: expose per-action fail probs if you want to debug
             "fail_probs": dict(self.fail_probs),
-            "init_main_deviation": init_main_deviation,
         }
         return self._obs(), info
 
@@ -194,7 +200,7 @@ class CorrectorPlayEnv(gym.Env):
                     continue
 
                 # Apply change to 'other' based on the change of the current parameter
-                delta[other] += target_change * factor
+                delta[other] += target_change * factor 
 
         # Add Gaussian noise to all non-zero deltas
         for k in self.KEYS:
@@ -206,23 +212,15 @@ class CorrectorPlayEnv(gym.Env):
             self.params[k] += delta[k]
 
         obs = self._obs()
-
-        # Reward: negative sum of absolute values of main correctors (normalized)
-        # Goal is to minimize A2, B2, A3, S3 to zero
-        main_deviation = sum(abs(self.params[k]) for k in self.MAIN_KEYS)
-        reward = -main_deviation / 8000.0  # Normalize by max possible (4 × 2000)
-
-        # Terminal condition: all main correctors within goal threshold
-        terminated = all(abs(self.params[k]) < self.goal_threshold for k in self.MAIN_KEYS)
-        truncated = (self.t >= self.max_steps) and (not terminated)
+        reward = 0.0
+        terminated = False
+        truncated = self.t >= self.max_steps
 
         info = {
             "action": act,
             "target_failed": target_failed,
             "fail_prob": fail_p,   # optional but useful for debugging/render
             "delta": delta,
-            "main_deviation": main_deviation,  # useful for monitoring training
-            "goal_achieved": terminated,
         }
 
         if self.render_mode == "human":
@@ -244,20 +242,19 @@ class CorrectorPlayEnv(gym.Env):
             return
 
         act = info["action"]
-        # Show deviation and goal status
-        dev = info.get("main_deviation", 0.0)
-        goal = info.get("goal_achieved", False)
-        dev_str = f" dev={dev:.2f} goal={goal}"
+        # (Optional) show the per-action fail probability used this step
+        fp = info.get("fail_prob", None)
+        fp_str = f" fail_p={fp:.3f}" if fp is not None else ""
 
         if act["type"] == "pct_button":
             print(
                 f"t={self.t}  "
-                f"act={act['target']} pct={act['pct']}{dev_str}  "
+                f"act={act['target']} pct={act['pct']}{fp_str}  "
                 f"{state_str}"
             )
         else:
             print(
                 f"t={self.t}  "
-                f"act=C3 step={act['step']} dir={act['dir']}{dev_str}  "
+                f"act=C3 step={act['step']} dir={act['dir']}{fp_str}  "
                 f"{state_str}"
             )
