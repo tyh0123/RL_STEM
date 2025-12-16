@@ -24,13 +24,24 @@ class CorrectorPlayEnv(gym.Env):
         base_step_range: tuple[float, float] = (0.0, 500.0),
         fail_prob_range: tuple[float, float] = (0.0, 0.2),  # Per-action fail prob range
         user_couplings: dict | None = None,
-        random_process: tuple[bool, bool, bool] = (True, True, True),  # (couplings, failures, noise)
+        gamma: dict | None = None,
+        target_change_sigma: dict | None = None,
+        random_process: dict | None = None,
     ):
         super().__init__()
         self.render_mode = render_mode
-        self.random_process = random_process
+        
+        self.random_process = {
+            "couplings": True,
+            "failures": True,
+            "target_noise": True
+        }
+        if random_process is not None:
+            self.random_process.update(random_process)
 
-        enable_couplings, enable_failures, enable_noise = self.random_process
+        enable_couplings = self.random_process["couplings"]
+        enable_failures = self.random_process["failures"]
+        enable_target_noise = self.random_process["target_noise"]
 
         if not enable_couplings:
             couple_prob_pct = 0.0
@@ -38,13 +49,20 @@ class CorrectorPlayEnv(gym.Env):
         if not enable_failures:
             fail_prob_range = (0.0, 0.0)
 
-        if not enable_noise:
-            noise_sigma = 0.0
-
         self.max_steps = int(max_steps)
-        self.noise_sigma = float(noise_sigma)
         self.couple_prob_pct = float(couple_prob_pct)
         self.user_couplings = user_couplings
+
+        self.gamma = {k: 1.0 for k in self.KEYS}
+        if gamma is not None:
+            self.gamma.update(gamma)
+
+        self.target_change_sigma = {k: 0.0 for k in self.KEYS}
+        if target_change_sigma is not None:
+            self.target_change_sigma.update(target_change_sigma)
+        
+        if not enable_target_noise:
+            self.target_change_sigma = {k: 0.0 for k in self.KEYS}
 
         # RNG for random variables that stay fixed during play
         self.static_rng = np.random.default_rng(static_seed)
@@ -84,7 +102,10 @@ class CorrectorPlayEnv(gym.Env):
         init_params = {}
         for k in self.KEYS:
             lo, hi = self.init_ranges[k]
-            init_params[k] = float(self.static_rng.uniform(lo, hi))
+            val = float(self.static_rng.uniform(lo, hi))
+            if k not in ["C1", "C3"]:
+                val = abs(val)
+            init_params[k] = val
         return init_params
 
     def _build_action_table(self):
@@ -131,7 +152,7 @@ class CorrectorPlayEnv(gym.Env):
                     couplings[key] = factor
                 else:
                     couplings[key] = 0.0
-        print(couplings)
+        # print(couplings)
         return couplings
 
     def _init_fail_probs_fixed(self, lo: float, hi: float):
@@ -175,11 +196,31 @@ class CorrectorPlayEnv(gym.Env):
             if not target_failed:
                 pct = act["pct"]
                 # delta[target] += - self.base_steps[target] * (pct / 100.0)
-                target_change = - self.params[target] * (pct / 100.0)
+                
+                val = self.params[target]
+                g = self.gamma.get(target, 1.0)
+                base_mag = abs(val) ** g
+                
+                # Add dynamic random error
+                sigma = self.target_change_sigma.get(target, 0.0)
+                if sigma > 0:
+                    noise = self.dynamic_rng.normal(0.0, sigma)
+                    base_mag += noise
+
+                target_change = - base_mag * (pct / 100.0)
+                
                 delta[target] += target_change
         elif act["type"] == "c3_step":
             if not target_failed:
-                target_change = act["dir"] * act["step"]
+                step_val = act["step"]
+                
+                # Add dynamic random error
+                sigma = self.target_change_sigma.get("C3", 0.0)
+                if sigma > 0:
+                    noise = self.dynamic_rng.normal(0.0, sigma)
+                    step_val += noise
+
+                target_change = act["dir"] * step_val
                 delta["C3"] += target_change
         else:
             raise ValueError("Unknown action type")
@@ -202,14 +243,11 @@ class CorrectorPlayEnv(gym.Env):
                 # Apply change to 'other' based on the change of the current parameter
                 delta[other] += target_change * factor 
 
-        # Add Gaussian noise to all non-zero deltas
-        for k in self.KEYS:
-            if delta[k] != 0.0:
-                delta[k] += float(self.dynamic_rng.normal(0.0, self.noise_sigma))
-
         # Apply deltas
         for k in self.KEYS:
             self.params[k] += delta[k]
+            if k not in ["C1", "C3"]:
+                self.params[k] = abs(self.params[k])
 
         obs = self._obs()
         reward = 0.0

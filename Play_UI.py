@@ -233,7 +233,17 @@ if __name__ == "__main__":
             "S3-C1": 0.0, "S3-A1": 0.0, "S3-A2": 0.0, "S3-B2": 0.0, "S3-A3": 0.0, "S3-C3": 0.0,
             "C3-C1": 0.0, "C3-A1": 0.0, "C3-A2": 0.0, "C3-B2": 0.0, "C3-A3": 0.0, "C3-S3": 0.0,
         },
-        random_process=(True, True, True),
+        gamma={
+            "C1": 1.0, "A1": 1.0, "A2": 1.0, "B2": 1.0, "A3": 1.0, "S3": 1.0, "C3": 1.0
+        },
+        target_change_sigma={
+            "C1": 0.0, "A1": 0.0, "A2": 0.0, "B2": 0.0, "A3": 0.0, "S3": 0.0, "C3": 0.0
+        },
+        random_process={
+            "couplings": True,
+            "failures": True,
+            "target_noise": True,
+        },
     )
 
     root = tk.Tk()
