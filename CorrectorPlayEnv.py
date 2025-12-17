@@ -1,6 +1,7 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+from typing import Dict, Any
 
 
 class CorrectorPlayEnv(gym.Env):
@@ -8,110 +9,84 @@ class CorrectorPlayEnv(gym.Env):
 
     KEYS = ["C1", "A1", "A2", "B2", "A3", "S3", "C3"]
     MAIN_KEYS = ["A2", "B2", "A3", "S3"]
-    C1A1_KEYS = ["C1", "A1"]
+    C3_KEYs = ["C3"]
+    C1_KEYS = ["C1"]
+    A1_KEYS = ["A1"]
 
     PCT_CHOICES = [-200, -100, -50, 10, 20, 50, 100, 200]
-    C3_STEPS = [0.01, 0.02, 0.05, 0.1]
+    C3_STEPS = [10, 20, 50, 100, 200]
+    C1_STEPS = [1, 5, 10, 50, 100]
 
     def __init__(
         self,
-        render_mode=None,
-        static_seed: int = 0,
-        dynamic_seed: int | None = None,
+        render_mode: str | None = None,
+        # seeds
+        error_seed: int | None = None,   # controls step-wise noise sampling
+        setting_seed: int = 0,           # controls beta/gamma/sigma sampling
+        init_seed: int | None = None,    # controls initial values sampling
+        # episode
         max_steps: int = 200,
+        # coupling / failure
         couple_prob_pct: float = 0.5,
-        noise_sigma: float = 50.0,
-        base_step_range: tuple[float, float] = (0.0, 500.0),
-        fail_prob_range: tuple[float, float] = (0.0, 0.2),  # Per-action fail prob range
-        user_couplings: dict | None = None,
-        gamma: dict | None = None,
-        target_change_sigma: dict | None = None,
-        random_process: dict | None = None,
+        fail_prob_range: tuple[float, float] = (0.0, 0.2),
+        # user overrides
+        user_beta: Dict[str, float] | None = None,    # per-key beta
+        user_gamma: Dict[str, float] | None = None,   # pair coupling "Src-Tgt" -> factor
+        user_sigma: Dict[str, float] | None = None,   # per-key sigma for OTHER params noise
+        # misc
+        init_ranges: Dict[str, tuple[float, float]] | None = None,
     ):
         super().__init__()
         self.render_mode = render_mode
-        
-        self.random_process = {
-            "couplings": True,
-            "failures": True,
-            "target_noise": True
-        }
-        if random_process is not None:
-            self.random_process.update(random_process)
 
-        enable_couplings = self.random_process["couplings"]
-        enable_failures = self.random_process["failures"]
-        enable_target_noise = self.random_process["target_noise"]
-
-        if not enable_couplings:
-            couple_prob_pct = 0.0
-        
-        if not enable_failures:
-            fail_prob_range = (0.0, 0.0)
+        self.error_seed = error_seed
+        self.setting_seed = int(setting_seed)
+        self.init_seed = init_seed
 
         self.max_steps = int(max_steps)
         self.couple_prob_pct = float(couple_prob_pct)
-        self.user_couplings = user_couplings
+        self.fail_prob_range = (float(fail_prob_range[0]), float(fail_prob_range[1]))
 
-        self.gamma = {k: 1.0 for k in self.KEYS}
-        if gamma is not None:
-            self.gamma.update(gamma)
+        # initial range 
+        self.init_ranges = init_ranges or {k: (-2000.0, 2000.0) for k in self.KEYS}
 
-        self.target_change_sigma = {k: 0.0 for k in self.KEYS}
-        if target_change_sigma is not None:
-            self.target_change_sigma.update(target_change_sigma)
-        
-        if not enable_target_noise:
-            self.target_change_sigma = {k: 0.0 for k in self.KEYS}
+        # user-provided overrides
+        self.user_beta = user_beta or {}
+        self.user_gamma = user_gamma or {}
+        self.user_sigma = user_sigma or {}
 
-        # RNG for random variables that stay fixed during play
-        self.static_rng = np.random.default_rng(static_seed)
+        # RNG that only depends on setting_seed (controls sampling of settings each reset)
+        self.setting_rng = np.random.default_rng(self.setting_seed)
 
-        # RNG for per-step stochasticity (noise + per-step failure draws)
-        if dynamic_seed is None:
-            dynamic_seed = int(self.static_rng.integers(0, 2**31 - 1))
-        self.dynamic_rng = np.random.default_rng(dynamic_seed)
-
-        # Base step per MAIN_KEY sampled once in [0, 500]
-        lo, hi = base_step_range
-        keys_for_steps = sorted(list(set(self.MAIN_KEYS + self.C1A1_KEYS)))
-        self.base_steps = {p: float(self.static_rng.uniform(lo, hi)) for p in keys_for_steps}
-
-        # Initial parameter ranges: ±2000 for all parameters
-        self.init_ranges = {k: (-2000.0, 2000.0) for k in self.KEYS}
-
-        # Initial parameters sampled once and kept fixed
-        self.init_params = self._sample_init_params_fixed()
-        self.params = dict(self.init_params)
-
-        # Build action table and spaces
+        # Build action table & spaces 
         self.action_table = self._build_action_table()
         self.action_space = spaces.Discrete(len(self.action_table))
         self.observation_space = spaces.Box(
             low=-np.inf, high=np.inf, shape=(len(self.KEYS),), dtype=np.float32
         )
 
-        # Initialize fixed couplings
-        self.couplings = self._init_couplings_fixed()
+        # stateful vars (reset() will fill them)
+        self.t = 0
+        self.params: Dict[str, float] = {}
+        self.init_params: Dict[str, float] = {}
 
-        # ✅ Per-action fail probabilities, fixed for the whole run
-        f_lo, f_hi = fail_prob_range
-        self.fail_probs = self._init_fail_probs_fixed(f_lo, f_hi)
+        self.beta: Dict[str, float] = {}      # exponent for pct button
+        self.couplings: Dict[str, float] = {} # "Src-Tgt" -> factor
+        self.sigma: Dict[str, float] = {}     # noise sigma for OTHER params
+        self.fail_probs: Dict[Any, float] = {}  # per-action fixed fail prob for this episode
 
-    def _sample_init_params_fixed(self):
-        init_params = {}
-        for k in self.KEYS:
-            lo, hi = self.init_ranges[k]
-            val = float(self.static_rng.uniform(lo, hi))
-            if k not in ["C1", "C3"]:
-                val = abs(val)
-            init_params[k] = val
-        return init_params
+        # per-episode RNGs (created in reset)
+        self.init_rng = None
+        self.error_rng = None
 
+    # ----------------------------
+    # Action table (interfaces separated)
+    # ----------------------------
     def _build_action_table(self):
         table = []
-        keys_for_buttons = sorted(list(set(self.MAIN_KEYS + self.C1A1_KEYS)))
-        for p in keys_for_buttons:
+
+        # pct buttons: MAIN_KEYS + A1 
+        for p in self.MAIN_KEYS + self.A1_KEYS:
             for pct in self.PCT_CHOICES:
                 table.append({
                     "type": "pct_button",
@@ -119,131 +94,227 @@ class CorrectorPlayEnv(gym.Env):
                     "pct": int(pct),
                     "key": (p, int(pct)),
                 })
+
+        # C3 step +/- dir
         for step in self.C3_STEPS:
             for direction in (-1, +1):
                 table.append({
-                    "type": "c3_step",
+                    "type": "step",
                     "target": "C3",
                     "step": float(step),
                     "dir": int(direction),
                     "key": ("C3", float(step), int(direction)),
                 })
+
+        # C1 step +/- dir
+        for step in self.C1_STEPS:
+            for direction in (-1, +1):
+                table.append({
+                    "type": "step",
+                    "target": "C1",
+                    "step": float(step),
+                    "dir": int(direction),
+                    "key": ("C1", float(step), int(direction)),
+                })
+
         return table
 
-    def _init_couplings_fixed(self):
-        couplings = {}
-        # Define coupling factor between each pair of parameters
-        # Keys are strings "Source-Target", values are floats (the coupling factor)
-        for source in self.KEYS:
-            for target in self.KEYS:
-                if source == target:
-                    continue
+    # ----------------------------
+    # Sampling at reset (all re-randomized)
+    # ----------------------------
+    def _ensure_rngs(self):
+        # init_rng: seeded once, then advances across resets
+        if self.init_rng is None:
+            if self.init_seed is None:
+                self.init_rng = np.random.default_rng()          # truly random
+            else:
+                self.init_rng = np.random.default_rng(int(self.init_seed))
+    
+        # error_rng: seeded once, then advances across steps
+        if self.error_rng is None:
+            if self.error_seed is None:
+                self.error_rng = np.random.default_rng()
+            else:
+                self.error_rng = np.random.default_rng(int(self.error_seed))
 
-                key = f"{source}-{target}"
 
-                # Check if user provided a specific coupling factor for this pair
-                if self.user_couplings is not None and key in self.user_couplings:
-                    couplings[key] = float(self.user_couplings[key])
-                    continue
+    def _sample_init_params(self):
+        init_params = {}
+        for k in self.KEYS:
+            lo, hi = self.init_ranges[k]
+            v = float(self.init_rng.uniform(lo, hi))
+            # keep your original constraint: non-(C1,C3) must be positive
+            if k not in ["C1", "C3"]:
+                v = abs(v)
+            init_params[k] = v
+        return init_params
 
-                if self.static_rng.random() < self.couple_prob_pct:
-                    # Generate a coupling factor, e.g. between -0.5 and 0.5
-                    factor = float(self.static_rng.uniform(-0.5, 0.5))
-                    couplings[key] = factor
+    def _sample_beta(self):
+        beta = {}
+    
+        if len(self.user_beta) == 0:
+            # no user beta: sample all
+            for k in self.KEYS:
+                beta[k] = float(self.setting_rng.uniform(0.8, 1.2))
+        else:
+            # user beta provided: defined keys use user value, others = 0.5
+            for k in self.KEYS:
+                if k in self.user_beta:
+                    beta[k] = float(self.user_beta[k])
                 else:
-                    couplings[key] = 0.0
-        # print(couplings)
+                    beta[k] = 1
+    
+        return beta
+
+
+    def _sample_sigma(self):
+        sigma = {}
+    
+        if len(self.user_sigma) == 0:
+            # no user sigma: sample all
+            for k in self.KEYS:
+                sigma[k] = float(self.setting_rng.uniform(0.0, 100.0))
+        else:
+            # user sigma provided: defined keys use user value, others = 0.0
+            for k in self.KEYS:
+                if k in self.user_sigma:
+                    sigma[k] = float(self.user_sigma[k])
+                else:
+                    sigma[k] = 0.0
+    
+        return sigma
+
+
+    def _sample_couplings(self):
+        couplings = {}
+        user_defined = (len(self.user_gamma) > 0)
+    
+        for src in self.KEYS:
+            for tgt in self.KEYS:
+                if src == tgt:
+                    continue
+    
+                key = f"{src}-{tgt}"
+    
+                if user_defined:
+                    # strictly follow user definition
+                    if key in self.user_gamma:
+                        couplings[key] = float(self.user_gamma[key])
+                    else:
+                        couplings[key] = 0.0
+                else:
+                    # random sparse coupling
+                    if self.setting_rng.random() < self.couple_prob_pct:
+                        couplings[key] = float(self.setting_rng.uniform(-0.2, 0.2))
+                    else:
+                        couplings[key] = 0.0
+    
         return couplings
 
-    def _init_fail_probs_fixed(self, lo: float, hi: float):
-        """Sample a fixed fail probability for each action key."""
-        fail_probs = {}
-        for act in self.action_table:
-            key = act["key"]
-            fail_probs[key] = float(self.static_rng.uniform(lo, hi))
-        return fail_probs
 
+
+    def _sample_fail_probs(self):
+        lo, hi = self.fail_prob_range
+        fp = {}
+        for act in self.action_table:
+            fp[act["key"]] = float(self.setting_rng.uniform(lo, hi))
+        return fp
+
+    # ----------------------------
+    # Gym API
+    # ----------------------------
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.t = 0
+    
+        self._ensure_rngs()
+    
+        # settings 每次 reset 重新 sample（由 setting_rng 控制）
+        self.beta = self._sample_beta()
+        self.sigma = self._sample_sigma()
+        self.couplings = self._sample_couplings()
+        self.fail_probs = self._sample_fail_probs()
+    
+        self.init_params = self._sample_init_params()
         self.params = dict(self.init_params)
-
-        info = {
-            "base_steps": dict(self.base_steps),
-            "init_params": dict(self.init_params),
-            # Optional: expose per-action fail probs if you want to debug
-            "fail_probs": dict(self.fail_probs),
-        }
+    
+        info = {"beta": dict(self.beta), "sigma": dict(self.sigma)}
         return self._obs(), info
+
 
     def step(self, action):
         self.t += 1
         act = self.action_table[int(action)]
-        key = act["key"]
         target = act["target"]
+        act_key = act["key"]
 
         delta = {k: 0.0 for k in self.KEYS}
 
-        # ✅ Use per-action fail probability (fixed) for the failure draw
-        fail_p = self.fail_probs[key]
-        target_failed = (self.dynamic_rng.random() < fail_p)
+        # per-action fixed fail prob (for this episode)
+        fail_p = self.fail_probs[act_key]
+        failed = (self.error_rng.random() < fail_p)
 
-        # Calculate the change applied to the target parameter
         target_change = 0.0
 
-        # Main update
         if act["type"] == "pct_button":
-            if not target_failed:
+            if not failed:
                 pct = act["pct"]
-                # delta[target] += - self.base_steps[target] * (pct / 100.0)
-                
                 val = self.params[target]
-                g = self.gamma.get(target, 1.0)
-                base_mag = abs(val) ** g
-                
-                # Add dynamic random error
-                sigma = self.target_change_sigma.get(target, 0.0)
-                if sigma > 0:
-                    noise = self.dynamic_rng.normal(0.0, sigma)
-                    base_mag += noise
-
-                target_change = - base_mag * (pct / 100.0)
-                
+                b = float(self.beta.get(target))
+                base_mag = abs(val) ** b
+                base_sig = float(self.sigma.get(target))
+                target_change = -(base_mag + float(self.error_rng.normal(0.0, base_sig))) * (pct / 100.0)
                 delta[target] += target_change
-        elif act["type"] == "c3_step":
-            if not target_failed:
-                step_val = act["step"]
                 
-                # Add dynamic random error
-                sigma = self.target_change_sigma.get("C3", 0.0)
-                if sigma > 0:
-                    noise = self.dynamic_rng.normal(0.0, sigma)
-                    step_val += noise
+                for other in self.KEYS:
+                    if other == target:
+                        continue
+                    ck = f"{target}-{other}"
+                    factor = float(self.couplings.get(ck))
+                    if factor == 0.0:
+                        continue
 
-                target_change = act["dir"] * step_val
-                delta["C3"] += target_change
+                    # add noise to OTHER params (sigma[other])
+                    sig = float(self.sigma.get(other))
+                    
+                    if sig > 0:
+                        coupled = (pct / 100.0)*(-factor*base_mag + float(self.error_rng.normal(0.0, sig)))
+                    else:
+                        coupled = -(pct / 100.0)*factor*base_mag
+                        
+                    delta[other] += coupled
+
+        elif act["type"] == "step":
+            if not failed:
+                step_val = float(act["step"])
+                base_sig = float(self.sigma.get(target))
+                target_change = int(act["dir"]) * (step_val + float(self.error_rng.normal(0.0, base_sig)))
+                delta[target] += target_change
+                
+                for other in self.KEYS:
+                    if other == target:
+                        continue
+                    ck = f"{target}-{other}"
+                    factor = float(self.couplings.get(ck))
+                    if factor == 0.0:
+                        continue
+
+                    # add noise to OTHER params (sigma[other])
+                    sig = float(self.sigma.get(other))
+                    
+                    if sig > 0:
+                        coupled = factor*(target_change + float(self.error_rng.normal(0.0, sig)))
+                    else:
+                        coupled = factor*target_change
+                        
+                    delta[other] += coupled
+
         else:
-            raise ValueError("Unknown action type")
+            raise ValueError(f"Unknown action type: {act['type']}")
 
-        # Coupling updates
-        # Only apply coupling if the main action succeeded
-        if not target_failed:
-            for other in self.KEYS:
-                if other == target:
-                    continue
+            
 
-                # Retrieve coupling factor for this pair
-                # Key format must match _init_couplings_fixed (string "Source-Target")
-                coupling_key = f"{target}-{other}"
-                factor = self.couplings.get(coupling_key, 0.0)
-
-                if factor == 0.0:
-                    continue
-
-                # Apply change to 'other' based on the change of the current parameter
-                delta[other] += target_change * factor 
-
-        # Apply deltas
+        # apply deltas + positivity constraint
         for k in self.KEYS:
             self.params[k] += delta[k]
             if k not in ["C1", "C3"]:
@@ -252,12 +323,12 @@ class CorrectorPlayEnv(gym.Env):
         obs = self._obs()
         reward = 0.0
         terminated = False
-        truncated = self.t >= self.max_steps
+        truncated = (self.t >= self.max_steps)
 
         info = {
             "action": act,
-            "target_failed": target_failed,
-            "fail_prob": fail_p,   # optional but useful for debugging/render
+            "target_failed": failed,
+            "fail_prob": fail_p,
             "delta": delta,
         }
 
@@ -272,27 +343,16 @@ class CorrectorPlayEnv(gym.Env):
     def render(self, info=None):
         if self.render_mode != "human":
             return
-
         state_str = "  ".join([f"{k}={self.params[k]:.4g}" for k in self.KEYS])
-
         if info is None:
             print(f"t={self.t}  {state_str}")
             return
 
         act = info["action"]
-        # (Optional) show the per-action fail probability used this step
         fp = info.get("fail_prob", None)
         fp_str = f" fail_p={fp:.3f}" if fp is not None else ""
 
         if act["type"] == "pct_button":
-            print(
-                f"t={self.t}  "
-                f"act={act['target']} pct={act['pct']}{fp_str}  "
-                f"{state_str}"
-            )
+            print(f"t={self.t} act={act['target']} pct={act['pct']}{fp_str}  {state_str}")
         else:
-            print(
-                f"t={self.t}  "
-                f"act=C3 step={act['step']} dir={act['dir']}{fp_str}  "
-                f"{state_str}"
-            )
+            print(f"t={self.t} act={act['target']} step={act['step']} dir={act['dir']}{fp_str}  {state_str}")
