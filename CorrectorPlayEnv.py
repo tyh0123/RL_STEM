@@ -263,10 +263,22 @@ class CorrectorPlayEnv(gym.Env):
                 b = float(self.beta.get(target))
                 base_mag = abs(val) ** b
                 base_sig = float(self.sigma.get(target))
-                target_change = -(base_mag + float(self.error_rng.normal(0.0, base_sig))) * (pct / 100.0)
-                delta[target] += target_change
+                # target_change = -(base_mag + float(self.error_rng.normal(0.0, base_sig))) * (pct / 100.0)
+                # delta[target] += target_change
+
+                # add symbolic regeression coupling A1 --> A1, C1 --> C1 
+                if target == 'C1':
+                    strength = pct / 100.0
+                    delta['C1'] = -(1.114694*self.params['C1'] - 0.548122*self.params['C1']*strength - 0.001768*self.params['C1']**3)
+                elif target == 'A1':
+                    strength = pct / 100.0
+                    delta['A1'] = -(1.323260*self.params['A1'] - 0.009184*self.params['A1']**2 - 1.927399*self.params['A1']*strength + 9.359637*strength**2 + 1.323260*np.abs(self.params['A1']) - 3.482047*(np.abs(self.params['A1'])**0.5))
+                else:
+                    target_change = -(base_mag + float(self.error_rng.normal(0.0, base_sig))) * (pct / 100.0)
+                    delta[target] = target_change
                 
                 for other in self.KEYS:
+
                     if other == target:
                         continue
                     ck = f"{target}-{other}"
@@ -292,6 +304,13 @@ class CorrectorPlayEnv(gym.Env):
                 delta[target] += target_change
                 
                 for other in self.KEYS:
+
+                    # add symbolic regression coupling C1 --> A1
+                    # if target == "C1" and other == "A1":
+                    #    print(delta['C1'])
+                    #    strength = int(act["dir"]) * step_val
+                    #    coupled = 0.470796*self.params['A1'] + 0.002396*self.params['C1']*strength + 0.004117*self.params['A1']*strength + 0.470796*np.abs(self.params['A1']) + 0.170275*np.abs(strength)
+                    # else:
                     if other == target:
                         continue
                     ck = f"{target}-{other}"
