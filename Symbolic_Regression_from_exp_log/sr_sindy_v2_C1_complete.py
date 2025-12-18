@@ -14,8 +14,8 @@ FIG_DIR = "sindy_validation_plots"
 os.makedirs(FIG_DIR, exist_ok=True)
 
 TEST_SIZE = 0.2
-RANDOM_STATE = 23
-THRESHOLD = 2.0
+RANDOM_STATE = 47
+THRESHOLD = 50.0
 TOL = 1e-10
 
 # ============================================================
@@ -36,8 +36,43 @@ def print_clean_sindy_equation(model, target_name="A1_afteraction", tol=1e-10):
 # ============================================================
 # Load data
 # ============================================================
+# df = pd.read_csv(CSV_PATH)
+#
+# X = df[["C1", "A1", "strength"]].to_numpy(float)
+# y = df["A1_afteraction"].to_numpy(float).reshape(-1, 1)
+# A1_true = y.ravel()
+# ============================================================
+# Load data
+# ============================================================
 df = pd.read_csv(CSV_PATH)
 
+# ------------------------------------------------------------
+# Filter small-strength samples (|strength| < 1)
+# ------------------------------------------------------------
+strength_all = df["strength"].to_numpy(float)
+strength_mask = np.abs(strength_all) >= 1.0
+
+print(f"Filtering |strength| < 1")
+print(f"Kept {strength_mask.sum()} / {len(strength_mask)} samples")
+
+df = df.loc[strength_mask].reset_index(drop=True)
+
+# ------------------------------------------------------------
+# Filter extreme C1 values (|C1| > 400)
+# ------------------------------------------------------------
+C1_all = df["C1"].to_numpy(float)
+
+C1_max_abs = 100.0
+C1_mask = np.abs(C1_all) <= C1_max_abs
+
+print(f"Filtering |C1| > {C1_max_abs}")
+print(f"Kept {C1_mask.sum()} / {len(C1_mask)} samples")
+
+df = df.loc[C1_mask].reset_index(drop=True)
+
+# ------------------------------------------------------------
+# Build X and y AFTER ALL filtering
+# ------------------------------------------------------------
 X = df[["C1", "A1", "strength"]].to_numpy(float)
 y = df["A1_afteraction"].to_numpy(float).reshape(-1, 1)
 A1_true = y.ravel()
