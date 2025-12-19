@@ -93,5 +93,5 @@ Provides an interactive control panel that mimics experimental corrector softwar
 
 - **requirements.txt**  
 
-List of Python dependencies required to run the symbolic regression, digital twin simulator, reinforcement learning training, and GUI.
+List of Python dependencies required to run the digital twin simulator, including symbolic regression, a GUI-based aberration simulator, and reinforcement learning training.
 
