@@ -19,7 +19,7 @@ This project introduces an **interpretable digital twin framework** that learns 
 The framework consists of four tightly coupled modules:
 
 1. **LLM-Based Log Parsing**  
-   Human-generated STEM aberration correction logs are automatically parsed and standardized using a large language model. The parser extracts time-ordered aberration coefficients, correction actions, and convergence behavior into structured trajectories suitable for downstream learning.
+   Human-generated STEM aberration correction logs are automatically parsed and standardized using a LLM agent. The parser extracts time-ordered aberration coefficients, correction actions, and convergence behavior into structured trajectories suitable for downstream learning.
 
 2. **Symbolic Regression for Aberration Coupling**  
    A sparsity-promoting symbolic regression method (SINDy-style) is applied to the parsed trajectories to identify **nonlinear and cross-coupled response relationships** between corrector settings and aberration evolution. The resulting analytical expressions provide interpretable models of corrector behavior.
