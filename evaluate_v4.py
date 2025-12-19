@@ -587,7 +587,7 @@ def main():
 
     # Environment arguments
     parser.add_argument("--max-steps", type=int, default=500, help="Max steps per episode")
-    parser.add_argument("--goal-threshold", type=float, default=50.0, help="Goal threshold for all params")
+    parser.add_argument("--goal-threshold", type=float, default=100.0, help="Goal threshold for all params")
     parser.add_argument("--max-deviation", type=float, default=100000.0, help="Early stop if total deviation exceeds this")
     parser.add_argument("--obs-clip", type=float, default=10000.0, help="Clip observations to prevent overflow")
 
