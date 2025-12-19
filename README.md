@@ -1,6 +1,6 @@
 # Interpretable Digital Twins for Autonomous STEM Aberration Correction
 
-This repository contains a proof-of-concept framework for **machine-learning-assisted aberration correction in scanning transmission electron microscopy (STEM)**. The project builds a corrector digital twin, integrating **LLM-based log parsing, symbolic regression, and reinforcement learning** to enable faster, more stable, and reproducible aberration correction with reduced reliance on expert operators.
+This repository contains a proof-of-concept framework for **machine-learning-assisted aberration correction in scanning transmission electron microscopy (STEM)**. The project develops a corrector digital twin that integrates **LLM-based log parsing, symbolic regression, and reinforcement learning** to enable faster, more stable, and reproducible aberration correction with reduced reliance on expert operators.
 
 ## Overview
 
