@@ -9,7 +9,7 @@ Achieving sub-ångström resolution in STEM requires precise tuning of lens aber
 This project introduces an **interpretable digital twin framework** that learns aberration–response relationships directly from real experimental logs and uses them to autonomously optimize correction strategies.
 
 <p align="center">
-  <img src="figures/figure1.png" alt="Figure 1: AI-based digital twin framework for STEM aberration correction" width="90%">
+  <img src="figures/AI_TEM.png" alt="Figure 1: AI-based digital twin framework for STEM aberration correction" width="90%">
 </p>
 
 *Figure 1: AI-based digital twin framework integrating LLM-based experimental log parsing, symbolic regression-derived coupling models, a corrector simulator, and reinforcement learning-based optimization in a closed loop with the physical microscope.*
