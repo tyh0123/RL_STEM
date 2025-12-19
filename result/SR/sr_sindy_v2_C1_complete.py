@@ -10,7 +10,7 @@ from sklearn.metrics import r2_score
 # ============================================================
 # Config
 # ============================================================
-CSV_PATH = "C1_actions.csv"
+CSV_PATH = "result/SR/C1_actions.csv"
 FIG_DIR = "sindy_validation_plots"
 os.makedirs(FIG_DIR, exist_ok=True)
 
