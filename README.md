@@ -30,7 +30,6 @@ The framework consists of four tightly coupled modules:
 4. **Reinforcement Learning–Based Optimization**  
    Aberration correction is formulated as a sequential decision-making problem and solved using a Proximal Policy Optimization (PPO) agent. The agent outputs multi-parameter correction actions simultaneously, learning a robust closed-loop policy under cross-coupled dynamics and stochastic disturbances.
 
-## Repository Structure
 
 ## Repository Structure and Code Description
 
