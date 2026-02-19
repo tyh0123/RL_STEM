@@ -2,7 +2,7 @@ import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 
-from CorrectorPlayEnv import CorrectorPlayEnv
+from CorrectorPlayEnv_v4 import CorrectorPlayEnv
 
 
 class PlayUI:
@@ -250,15 +250,15 @@ if __name__ == "__main__":
         max_steps=500,
         couple_prob_pct=0.5,
         # If you define user_gamma (even partially), missing pairs become 0 (no random coupling)
-        user_gamma={'C1-A1':0.0005, 
+        user_gamma={'C1-A1':0.0005,
                     'A1-C1':0.24,
-                    'B2-A1':-0.912/10, 'B2-C1':-1.82/10, 
-                    'A2-A1':-1.244/10, 'A2-C1':-0.637/10, 'A2-B2':-1.18/5, 
+                    'B2-A1':-0.912/10, 'B2-C1':-1.82/10,
+                    'A2-A1':-1.244/10, 'A2-C1':-0.637/10, 'A2-B2':-1.18/5,
                     'C3-C1':-0.72/100, 'C3-A1':-0.44/100, 'C3-A2':+0.967/10, 'C3-B2':+0.882/10, 'C3-S3':+0.345,
                     'S3-A1':-0.325/100,'S3-C1':-1.332/100,'S3-A2':-0.777/20,'S3-B2':-0.577/20,'S3-A3':0.2,'S3-C3':0.23},  # leave empty to enable random sparse coupling via couple_prob_pct
         user_beta={},   # leave empty to let env sample beta (if you implemented that behavior)
         user_sigma={'C1':1,'A1':1,'A2':100,'B2':20,'C3':200,'A3':100,'S3':100},  # leave empty to let env sample sigma (if you implemented that behavior)
-        init_ranges={'C1':(-20,20),'A1':(0, 50), 'A2':(0,500), 'B2':(0,500), 
+        init_ranges={'C1':(-20,20),'A1':(0, 50), 'A2':(0,500), 'B2':(0,500),
                      'C3':(-3000,3000), 'S3':(0,3000), 'A3':(0, 3000)}
     )
 
